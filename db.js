@@ -1,51 +1,59 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require('pg');
+require('dotenv').config();
 
-// Archivo de base de datos SQLite
-const dbPath = path.resolve(__dirname, 'credicontrol.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error al conectar con SQLite:', err.message);
-  } else {
-    console.log('✅ Base de datos SQLite conectada correctamente.');
+// Conexión a la base de datos PostgreSQL (Supabase)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false // Requerido para la conexión segura en Render/Supabase
   }
 });
 
-db.serialize(() => {
-  // 1. Tabla de Usuarios (Negocios / Comercios)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS usuarios (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL
-    )
-  `);
+// Inicialización de tablas en PostgreSQL
+const initDb = async () => {
+  try {
+    // 1. Tabla de Usuarios
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usuarios (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL
+      );
+    `);
 
-  // 2. Tabla de Clientes (Personas a consultar)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS clientes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cedula TEXT UNIQUE NOT NULL,
-      nombre TEXT NOT NULL,
-      telefono TEXT
-    )
-  `);
+    // 2. Tabla de Clientes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS clientes (
+        id SERIAL PRIMARY KEY,
+        cedula VARCHAR(50) UNIQUE NOT NULL,
+        nombre VARCHAR(255) NOT NULL,
+        telefono VARCHAR(50)
+      );
+    `);
 
-  // 3. Tabla de Reportes Crediticios
-  db.run(`
-    CREATE TABLE IF NOT EXISTS reportes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cliente_id INTEGER NOT NULL,
-      usuario_id INTEGER NOT NULL,
-      estado TEXT CHECK(estado IN ('al_dia', 'vencido')) NOT NULL,
-      monto REAL DEFAULT 0,
-      comentario TEXT,
-      fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(cliente_id) REFERENCES clientes(id),
-      FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
-    )
-  `);
-});
+    // 3. Tabla de Reportes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reportes (
+        id SERIAL PRIMARY KEY,
+        cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+        usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        estado VARCHAR(20) CHECK (estado IN ('al_dia', 'vencido')) NOT NULL,
+        monto NUMERIC DEFAULT 0,
+        comentario TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
-module.exports = db;
+    console.log('✅ Base de datos PostgreSQL conectada y tablas inicializadas.');
+  } catch (err) {
+    console.error('❌ Error al inicializar las tablas en PostgreSQL:', err.message);
+  }
+};
+
+initDb();
+
+module.exports = {
+  query: (text, params) => pool.query(text, params),
+  pool
+};
